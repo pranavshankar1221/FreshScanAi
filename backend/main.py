@@ -15,9 +15,12 @@ try:
 except ImportError:
     pass
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Depends, Query
+from fastapi import Body, FastAPI, File, UploadFile, Form, HTTPException, Depends, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 from supabase import create_client, Client
 from PIL import Image
 
@@ -32,6 +35,7 @@ except ModuleNotFoundError:
     print("WARNING: PyTorch not installed. Scan endpoints will return 503.")
 
 from auth import get_current_user, get_google_oauth_url, exchange_code_for_session
+from turnstile import TURNSTILE_SECRET_KEY, verify_turnstile_token
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 # All secrets MUST come from environment variables — no hardcoded fallbacks.
@@ -110,7 +114,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(429, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # ── Domain helpers ────────────────────────────────────────────────────────────
 
@@ -328,12 +335,43 @@ async def _upload_image(image_bytes: bytes, user_id: str, scan_id: str) -> Optio
 # ── AUTH ──────────────────────────────────────────────────────────────────────
 
 
-@app.get("/api/v1/auth/login/google")
-async def login_google():
+def _auth_redirect_url() -> str:
     callback_url = f"{API_BASE_URL}/api/v1/auth/callback"
+    return get_google_oauth_url(redirect_to=callback_url)
+
+
+async def _verify_turnstile(turnstile_token: str | None, request: Request) -> None:
+    if TURNSTILE_SECRET_KEY:
+        await verify_turnstile_token(turnstile_token, request.client.host)
+
+
+@app.get("/api/v1/auth/login/google")
+@limiter.limit("5/minute")
+async def login_google_get(
+    request: Request,
+    turnstile_token: str | None = Query(None, alias="turnstile_token"),
+):
     try:
-        url = get_google_oauth_url(redirect_to=callback_url)
-        return RedirectResponse(url=url)
+        await _verify_turnstile(turnstile_token, request)
+        return RedirectResponse(url=_auth_redirect_url())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not generate OAuth URL: {exc}")
+
+
+@app.post("/api/v1/auth/login/google")
+@limiter.limit("5/minute")
+async def login_google_post(
+    request: Request,
+    payload: dict | None = Body(None),
+):
+    turnstile_token = payload.get("turnstile_token") if payload else None
+    try:
+        await _verify_turnstile(turnstile_token, request)
+        return {"redirect_url": _auth_redirect_url()}
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Could not generate OAuth URL: {exc}")
 

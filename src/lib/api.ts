@@ -92,7 +92,17 @@ export interface GradcamResponse { gradcam_image: string; predicted_class: strin
 // ── API surface ───────────────────────────────────────────────────────────────
 
 export const api = {
-  loginUrl: (): string => `${API_BASE}/api/v1/auth/login/google`,
+  loginUrl: async (turnstileToken?: string): Promise<string> => {
+    if (turnstileToken) {
+      const response = await apiFetch<{ redirect_url: string }>('/api/v1/auth/login/google', {
+        method: 'POST',
+        body: JSON.stringify({ turnstile_token: turnstileToken }),
+      });
+      return response.redirect_url;
+    }
+
+    return `${API_BASE}/api/v1/auth/login/google`;
+  },
 
   getMe: (): Promise<UserProfile> => apiFetch<UserProfile>('/api/v1/auth/me'),
 
