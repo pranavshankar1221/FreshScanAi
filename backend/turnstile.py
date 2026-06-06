@@ -6,7 +6,10 @@ from fastapi import HTTPException
 
 TURNSTILE_SECRET_KEY = os.environ.get('TURNSTILE_SECRET_KEY', '')
 
-async def verify_turnstile_token(turnstile_token: Optional[str], remote_ip: Optional[str] = None) -> None:
+async def verify_turnstile_token(
+    turnstile_token: Optional[str],
+    remote_ip: Optional[str] = None,
+) -> None:
     if not TURNSTILE_SECRET_KEY:
         raise HTTPException(
             status_code=500,
