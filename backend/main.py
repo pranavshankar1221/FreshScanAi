@@ -6,7 +6,10 @@ from pathlib import Path
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Optional
-
+from auth import get_current_user, get_google_oauth_url, exchange_code_for_session
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from rate_limiter import limiter
 
 # Load .env file if present (python-dotenv)
 try:
@@ -22,6 +25,9 @@ from fastapi.responses import RedirectResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
+from fastapi import FastAPI, File, Request, UploadFile, Form, HTTPException, Depends, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse
 from supabase import create_client, Client
 from PIL import Image
 
@@ -128,6 +134,20 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(429, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={
+            "error": "rate_limit_exceeded",
+            "detail": "Too many requests. Please slow down.",
+            "retry_after": exc.headers.get("Retry-After", "60"),
+        },
+        headers={"Retry-After": exc.headers.get("Retry-After", "60")},
+    )
 
 # ── Health check ──────────────────────────────────────────────────────────────
 # HF Spaces polls GET /?logs=container — without this route, FastAPI returns
@@ -357,7 +377,10 @@ async def _upload_image(image_bytes: bytes, user_id: str, scan_id: str) -> Optio
 
 
 # ── AUTH ──────────────────────────────────────────────────────────────────────
-
+@app.get("/api/v1/health")
+async def api_health_check():
+    """Health check endpoint — no auth or DB required."""
+    return {"status": "ok"}
 
 def _auth_redirect_url() -> str:
     callback_url = f"{API_BASE_URL}/api/v1/auth/callback"
@@ -450,7 +473,9 @@ if __name__ == "__main__":
 
 
 @app.post("/api/v1/scan")
+@limiter.limit("20/minute")
 async def process_scan(
+    request: Request,
     body_image: UploadFile = File(...),
     eye_image: UploadFile = File(...),
     gill_image: UploadFile = File(...),
@@ -500,7 +525,9 @@ async def process_scan(
 
 
 @app.post("/api/v1/scan-auto")
+@limiter.limit("20/minute")
 async def scan_auto(
+    request: Request,
     image: UploadFile = File(...),
     current_user=Depends(get_current_user),
 ):
