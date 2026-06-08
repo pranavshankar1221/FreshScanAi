@@ -1,8 +1,11 @@
 import os
+import logging
 from typing import Optional
 
 import httpx
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 TURNSTILE_SECRET_KEY = os.environ.get('TURNSTILE_SECRET_KEY', '')
 
@@ -36,9 +39,10 @@ async def verify_turnstile_token(
             response.raise_for_status()
             data = response.json()
     except Exception as exc:
+        logger.error(f'Turnstile verification failed: {exc}', exc_info=True)
         raise HTTPException(
             status_code=502,
-            detail=f'Turnstile verification failed: {exc}',
+            detail='Service unavailable. Please try again later.',
         )
 
     if not data.get('success'):
