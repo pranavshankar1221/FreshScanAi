@@ -7,9 +7,11 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Optional
 from auth import get_current_user, get_google_oauth_url, exchange_code_for_session
+from turnstile import TURNSTILE_SECRET_KEY, verify_turnstile_token
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from rate_limiter import limiter
+
 
 # Load .env file if present (python-dotenv)
 try:
@@ -21,9 +23,8 @@ except ImportError:
 
 from fastapi import Body, FastAPI, File, UploadFile, Form, HTTPException, Depends, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from fastapi.responses import RedirectResponse, JSONResponse
+from slowapi import _rate_limit_exceeded_handler
 from supabase import create_client, Client
 from PIL import Image
 
@@ -36,9 +37,6 @@ try:
 except ModuleNotFoundError:
     _torch_available = False
     print("WARNING: PyTorch not installed. Scan endpoints will return 503.")
-
-from auth import get_current_user, get_google_oauth_url, exchange_code_for_session
-from turnstile import TURNSTILE_SECRET_KEY, verify_turnstile_token
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 # All secrets MUST come from environment variables — no hardcoded fallbacks.
@@ -124,13 +122,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-<<<<<<< HEAD
-limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(429, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
-=======
-app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 
 @app.exception_handler(RateLimitExceeded)
@@ -144,7 +137,6 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
         },
         headers={"Retry-After": exc.headers.get("Retry-After", "60")},
     )
->>>>>>> d33d33e4c8d94e963b4fd6ef211f519537aa96a5
 
 # ── Health check ──────────────────────────────────────────────────────────────
 # HF Spaces polls GET /?logs=container — without this route, FastAPI returns
@@ -580,6 +572,9 @@ async def scan_auto(
     from router import classify_image_type, ImageType
 
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+
+
     image_type = classify_image_type(img)
 
     if image_type == ImageType.NOT_A_FISH:
@@ -909,6 +904,7 @@ async def generate_gradcam(
     from inference import stream_a_model, stream_a_transforms, device
     from router import is_valid_fish_image
 
+
     # Fish validity gate — same gate used by /api/v1/scan-auto
     is_fish, gate_score = is_valid_fish_image(img_pil)
     print(f"   [GradCAM] Fish gate: {'PASS' if is_fish else 'FAIL'} (score={gate_score:.2%})")
@@ -997,3 +993,4 @@ from vendors import router as vendors_router, register_routes
 
 register_routes(vendors_router, _db)
 app.include_router(vendors_router)
+
