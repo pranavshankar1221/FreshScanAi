@@ -16,6 +16,17 @@ export default function AuthPage() {
   const [status, setStatus] = useState<'idle' | 'processing' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const { containerRef, ready: turnstileReady, execute: executeTurnstile, error: turnstileError } = useTurnstile(TURNSTILE_SITE_KEY);
+  const [status, setStatus] = useState<'idle' | 'processing' | 'error'>(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('error')) return 'error';
+    if (params.get('access_token')) return 'processing';
+    return 'idle';
+  });
+
+  const [errorMsg, setErrorMsg] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('error') ? 'Authentication failed. Please try again.' : '';
+  });
 
   // Handle redirect from backend OAuth callback
   useEffect(() => {
@@ -24,14 +35,11 @@ export default function AuthPage() {
     const error = params.get('error');
 
     if (error) {
-      setStatus('error');
-      setErrorMsg('Authentication failed. Please try again.');
       window.history.replaceState({}, '', '/auth');
       return;
     }
 
     if (accessToken) {
-      setStatus('processing');
       setToken(accessToken);
       window.history.replaceState({}, '', '/auth');
       navigate('/mode', { replace: true });
@@ -63,6 +71,7 @@ export default function AuthPage() {
         throw new Error('Login URL configuration missing');
       }
 
+      // Force full browser navigation for OAuth
       window.location.href = loginUrl;
     } catch (err) {
       setStatus('error');
